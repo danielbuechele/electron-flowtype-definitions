@@ -228,6 +228,8 @@ export default class ElectronFlowTypeGenerator {
     if (m.returns) {
       result += []
         .concat(m.returns)
+        // method returns are always guaranteed
+        .map(r => ({...r, required: true}))
         .map(this.identifierToString)
         .join(' ');
     } else {
