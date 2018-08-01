@@ -31,6 +31,20 @@ export default class ElectronFlowTypeGenerator {
     this.apiDefinition = apiDefinition;
   }
 
+  exportsForProcess(processName: 'main' | 'renderer'): string {
+    const filterForProcess = a => !(a.process && !a.process[processName]);
+    return [
+      ...this.apiDefinition
+        .filter(filterForProcess)
+        .filter(a => a.type === 'Module')
+        .map(a => this.moduleToString(a)),
+      ...this.apiDefinition
+        .filter(filterForProcess)
+        .filter(a => a.type === 'Class')
+        .map(a => `${a.name}: Class<${a.name}>`),
+    ].join(',\n');
+  }
+
   generateTypeDefinitions = (processName: 'main' | 'renderer'): string => {
     let result = [
       // file header
@@ -38,23 +52,24 @@ export default class ElectronFlowTypeGenerator {
       // main electron module
       this.declareModule(
         'electron',
+        this.exportsForProcess(processName),
         [
           // electron defined structures
           ...this.apiDefinition
             .filter(a => a.type === 'Structure')
             .map(this.structureToString),
-          this.getModulesForProcess(processName),
           ...this.apiDefinition
             .filter(a => a.type === 'Element')
             .map(this.elementToString),
           ...this.apiDefinition
             .filter(a => a.type === 'Class')
             .map(this.classToString),
+
           // root level definitions
           ...this.rootLevel,
 
           // add unknown types
-          ...[...this.unknownTypes]
+          ...Array.from(this.unknownTypes)
             .filter(f => !this.knownTypes.has(f))
             .map(t => `declare type ${t} = any;`),
         ].join('\n')
@@ -69,25 +84,9 @@ export default class ElectronFlowTypeGenerator {
     });
   };
 
-  getModulesForProcess = (
-    processName: 'main' | 'renderer',
-    renderer: Function = this.moduleToString
-  ): string => {
-    const result = this.apiDefinition
-      .map(
-        a =>
-          a.type === 'Module' &&
-          !(a.process && !a.process[processName]) &&
-          renderer(a, 'declare export var ')
-      )
-      .filter(Boolean);
-
-    return result.join('\n');
-  };
-
   elementToString = (e: electron$Element): string => {
     this.knownTypes.add(e.name);
-    let result = `declare export class ${e.name} extends HTMLElement {`;
+    let result = `declare class ${e.name} extends HTMLElement {`;
     if (e.methods) {
       result += e.methods.map(this.methodToString).join(',') + ',';
     }
@@ -98,7 +97,7 @@ export default class ElectronFlowTypeGenerator {
     return result;
   };
 
-  classToString = (c: electron$Class, exports: boolean = true): string => {
+  classToString = (c: electron$Class): string => {
     let result = '';
     if (c.constructorMethod) {
       result +=
@@ -125,14 +124,14 @@ export default class ElectronFlowTypeGenerator {
     }
     if (c.staticProperties) {
       result += c.staticProperties
-        .map(p => ({...p, required: true}))
+        .map(p => ({ ...p, required: true }))
         .map(this.identifierToString)
         .map(i => `static ${i}`)
         .join('');
     }
     if (c.instanceProperties) {
       result += c.instanceProperties
-        .map(p => ({...p, required: true}))
+        .map(p => ({ ...p, required: true }))
         .map(this.identifierToString)
         .join('');
     }
@@ -140,7 +139,7 @@ export default class ElectronFlowTypeGenerator {
       result += this.eventsToString(c.instanceEvents);
     }
     this.knownTypes.add(c.name);
-    return `declare ${exports ? 'export' : ''} class ${c.name} {
+    return `declare class ${c.name} {
       ${result}
     }`;
   };
@@ -170,13 +169,7 @@ export default class ElectronFlowTypeGenerator {
     }
     return `${prefix || ''} ${m.name}: {
       ${result}
-      ${
-        m.name === 'remote'
-          ? this.getModulesForProcess('main', m =>
-            this.moduleToString(m, '', ',')
-          )
-          : ''
-      }
+      ${m.name === 'remote' ? this.exportsForProcess('main') : ''}
     } ${postfix || ''}`;
   };
 
@@ -222,14 +215,14 @@ export default class ElectronFlowTypeGenerator {
 
   methodToString = (m: Method, withoutName: boolean = false): string => {
     let result = `${
-      withoutName === true ? '' : `${m.name}:`
+      withoutName === true ? '' : `${m.name}: `
     } (${this.signatureToString(m.parameters)} => `;
 
     if (m.returns) {
       result += []
         .concat(m.returns)
         // method returns are always guaranteed
-        .map(r => ({...r, required: true}))
+        .map(r => ({ ...r, required: true }))
         .map(this.identifierToString)
         .join(' ');
     } else {
@@ -237,18 +230,16 @@ export default class ElectronFlowTypeGenerator {
     }
 
     if (m.parameters && m.parameters.length > 1 && !m.parameters[0].required) {
-      result +=
-        ' | ' +
-        this.methodToString(
-          {
-            ...m,
-            parameters: m.parameters.slice(1),
-          },
-          true
-        );
+      return `${result}) & (${this.methodToString(
+        {
+          ...m,
+          parameters: m.parameters.slice(1),
+        },
+        true
+      )})`;
+    } else {
+      return result + ')';
     }
-
-    return result + ')';
   };
 
   identifierToString = (i: Identifier): string => {
@@ -263,7 +254,7 @@ export default class ElectronFlowTypeGenerator {
       result += i.possibleValues.map(p => `'${p.value}'`).join(' | ');
     } else if (i.type === 'Class') {
       result += `Class<${i.name}>`;
-      this.rootLevel.push(this.classToString(i, false));
+      this.rootLevel.push(this.classToString(i));
     } else {
       result += []
         .concat(i.type)
@@ -312,9 +303,12 @@ export default class ElectronFlowTypeGenerator {
     }
   };
 
-  declareModule(name: string, content: string): string {
+  declareModule(name: string, exports: string, declares: string): string {
     return `declare module '${name}' {
-      ${content}
+      declare module.exports: {
+        ${exports}
+      }
+      ${declares}
     }`;
   }
 
