@@ -7,6 +7,7 @@
  *
  */
 
-const {remote, crashReporter} = require('electron');
+const {TouchBar, crashReporter} = require('electron');
+
 
 const touchBarBottom = new TouchBar.TouchBarButton({});

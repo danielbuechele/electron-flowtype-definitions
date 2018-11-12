@@ -76,12 +76,19 @@ export default class ElectronFlowTypeGenerator {
       ),
     ];
 
-    return prettier.format(result.join('\n'), {
-      trailingComma: 'all',
-      singleQuote: true,
-      bracketSpacing: false,
-      parser: 'flow',
-    });
+    result = result.join('\n');
+
+    try {
+      result = prettier.format(result, {
+        trailingComma: 'all',
+        singleQuote: true,
+        bracketSpacing: false,
+        parser: 'flow',
+      })
+    } catch (e) {
+      console.error(e);
+    }
+    return result;
   };
 
   elementToString = (e: electron$Element): string => {
@@ -100,17 +107,7 @@ export default class ElectronFlowTypeGenerator {
   classToString = (c: electron$Class): string => {
     let result = '';
     if (c.constructorMethod) {
-      result +=
-        this.methodToString({
-          name: 'constructor',
-          ...c.constructorMethod,
-          returns: [
-            {
-              type: c.name,
-              required: true,
-            },
-          ],
-        }) + ',';
+      result += `constructor${this.signatureToString(c.constructorMethod.parameters)}: ${c.name},`;
     }
     if (c.staticMethods) {
       result +=
